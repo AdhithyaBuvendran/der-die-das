@@ -10,4 +10,4 @@ A browser quiz for learning German nouns with their articles (der, die, das, plu
 Every answer shows the reason a noun has its gender, including exceptions.
 
 ## Run
-Open `index.html` in any browser. No install or build step needed.
+Open `Artikel_index.html` in any browser. No install or build step needed.
