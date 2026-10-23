@@ -89,6 +89,18 @@ button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visi
 @keyframes shake{20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
 @keyframes pop{50%{transform:scale(1.03)}}
 @media (prefers-reduced-motion: reduce){.shake,.pop{animation:none}.bar i{transition:none}}
+.wordrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
+.say{flex:none;width:46px;height:46px;border-radius:50%;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);display:grid;place-items:center;cursor:pointer;padding:0;transition:background .15s,border-color .15s,color .15s}
+.say:hover{border-color:var(--muted)}
+.say svg{width:21px;height:21px;display:block}
+.say.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.say.sm{width:34px;height:34px}.say.sm svg{width:16px;height:16px}
+.sound{display:flex;flex-wrap:wrap;gap:8px 16px}
+.chk{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:.9rem;cursor:pointer}
+.chk input{width:18px;height:18px;margin:0;accent-color:var(--der)}
+.vnote{color:var(--muted);font-size:.85rem;flex-basis:100%;margin:0}
+.fb .full{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.misslist .w{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
 .summary h2,.section h2{font-family:var(--display);font-size:1.6rem;margin:0;line-height:1.15;text-wrap:balance}
 .big-score{font-family:var(--display);font-weight:800;font-size:3.4rem;line-height:1;font-variant-numeric:tabular-nums}
 .misslist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
@@ -104,7 +116,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visi
 .list{display:flex;flex-direction:column;gap:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .list details{border-top:1px solid var(--line)}
 .list details:first-child{border-top:0}
-.list summary{display:grid;grid-template-columns:3.2em minmax(0,1fr) minmax(0,1fr);gap:10px;padding:10px 14px;cursor:pointer;list-style:none;align-items:baseline}
+.list summary{display:grid;grid-template-columns:3.2em minmax(0,1fr) minmax(0,1fr) auto;gap:10px;padding:8px 14px;cursor:pointer;list-style:none;align-items:center}
 .list summary::-webkit-details-marker{display:none}
 .list summary .a{font-weight:700}
 .list summary .g{font-weight:700;overflow-wrap:anywhere}
@@ -117,8 +129,9 @@ footer{color:var(--muted);font-size:.82rem}
 @media (max-width:520px){
   .opts{grid-template-columns:1fr}
   .stats{grid-template-columns:repeat(2,1fr)}
-  .list summary{grid-template-columns:3em minmax(0,1fr)}
+  .list summary{grid-template-columns:3em minmax(0,1fr) auto}
   .list summary .e{grid-column:2}
+  .list summary .say{grid-column:3;grid-row:1 / span 2}
   .list details p{padding-left:14px}
 }
 </style>
@@ -147,6 +160,11 @@ footer{color:var(--muted);font-size:.82rem}
     <label class="sel" for="cat">Topic
       <select id="cat"></select>
     </label>
+    <div class="sound" role="group" aria-label="Pronunciation">
+      <label class="chk" for="auto"><input type="checkbox" id="auto"> Read answers aloud</label>
+      <label class="chk" for="slow"><input type="checkbox" id="slow"> Slow speech</label>
+    </div>
+    <p class="vnote" id="voicenote" hidden></p>
   </div>
 
   <main id="game" class="section"></main>
@@ -723,6 +741,50 @@ function artCode(baseStr){const a = baseStr.split(" ")[0];return a==="der"?"m":a
 /* state */
 const S = {mode:"art", cat:"all", queue:[], idx:0, score:0, streak:0, best:0, misses:[], answered:false, opts:[], retry:false, q:""};
 try { S.best = parseInt(localStorage.getItem("ddd-best") || "0", 10) || 0; } catch(e) {}
+
+/* pronunciation (browser speech, German voice) */
+const TTS = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
+let deVoice = null, sayingBtn = null;
+const autoBox = document.getElementById("auto"), slowBox = document.getElementById("slow"), vnote = document.getElementById("voicenote");
+try { S.auto = localStorage.getItem("ddd-auto") === "1"; S.slow = localStorage.getItem("ddd-slow") === "1"; } catch(e) {}
+autoBox.checked = !!S.auto; slowBox.checked = !!S.slow;
+autoBox.addEventListener("change", () => { S.auto = autoBox.checked; try{localStorage.setItem("ddd-auto", S.auto?"1":"0");}catch(e){} });
+slowBox.addEventListener("change", () => { S.slow = slowBox.checked; try{localStorage.setItem("ddd-slow", S.slow?"1":"0");}catch(e){} });
+function pickVoice(){
+  if (!TTS) return;
+  const vs = speechSynthesis.getVoices();
+  const de = vs.filter(v => /^de([-_]|$)/i.test(v.lang));
+  deVoice = de.find(v => /de[-_]DE/i.test(v.lang) && /google|natural|online|premium|enhanced/i.test(v.name))
+    || de.find(v => /de[-_]DE/i.test(v.lang)) || de[0] || null;
+  if (vs.length && !deVoice) { vnote.textContent = "No German voice found on this device, so words may sound English. Add German under your system's speech or language settings, or try Chrome or Edge."; vnote.hidden = false; }
+  else vnote.hidden = true;
+}
+if (TTS) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+else { autoBox.disabled = slowBox.disabled = true; vnote.textContent = "This browser cannot play speech, so the speaker buttons are hidden."; vnote.hidden = false; }
+function sayText(it){ return ART[it.a] + " " + it.w; }
+const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
+function sayBtn(text, small){
+  if (!TTS) return "";
+  return `<button type="button" class="say${small ? " sm" : ""}" data-say="${esc(text)}" aria-label="Pronounce ${esc(text)}" title="Pronounce (S)">${SPK}</button>`;
+}
+function speak(text, btn){
+  if (!TTS || !text) return;
+  speechSynthesis.cancel();
+  if (sayingBtn) sayingBtn.classList.remove("on");
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = deVoice ? deVoice.lang : "de-DE";
+  if (deVoice) u.voice = deVoice;
+  u.rate = S.slow ? 0.55 : 0.9;
+  sayingBtn = btn || null;
+  if (btn) { btn.classList.add("on"); u.onend = u.onerror = () => btn.classList.remove("on"); }
+  speechSynthesis.speak(u);
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest(".say");
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  speak(b.dataset.say, b);
+});
 const ROUND = 10;
 
 const catSel = document.getElementById("cat");
@@ -772,10 +834,10 @@ function renderQ(){
   const it = S.queue[S.idx];
   let prompt, opts;
   if (S.mode === "art") {
-    prompt = `<span class="kicker">Which article?</span><div class="word">${esc(it.w)}</div><div class="hint">${esc(it.e)}</div>`;
+    prompt = `<span class="kicker">Which article?</span><div class="wordrow"><div class="word">${esc(it.w)}</div>${sayBtn(it.w)}</div><div class="hint">${esc(it.e)}</div>`;
     opts = S.opts.map((a,i) => `<button type="button" class="opt big c-${a}" data-v="${a}"><span class="k">${i+1}</span>${a==="p"?"die<small>plural</small>":ART[a]}</button>`).join("");
   } else if (S.mode === "de") {
-    prompt = `<span class="kicker">What does it mean?</span><div class="word">${full(it).replace('class="t-','class="art t-')}</div>`;
+    prompt = `<span class="kicker">What does it mean?</span><div class="wordrow"><div class="word">${full(it).replace('class="t-','class="art t-')}</div>${sayBtn(sayText(it))}</div>`;
     opts = S.opts.map((x,i) => `<button type="button" class="opt" data-v="${x.id}"><span class="k">${i+1}</span>${esc(x.e)}</button>`).join("");
   } else {
     prompt = `<span class="kicker">How do you say it in German?</span><div class="word">${esc(it.e)}</div>`;
@@ -785,7 +847,7 @@ function renderQ(){
     <div class="prompt">${prompt}</div>
     <div class="opts" id="opts">${opts}</div>
     <div id="fb" hidden></div>
-    <div class="kbd">Keys 1 to 4 answer, Enter goes on.</div>
+    <div class="kbd">Keys 1 to 4 answer${TTS ? ", S plays the word" : ""}, Enter goes on.</div>
   </div>`;
   game.querySelectorAll(".opt").forEach(b => b.addEventListener("click", () => answer(b.dataset.v)));
 }
@@ -807,10 +869,11 @@ function answer(v){
   const fb = document.getElementById("fb");
   fb.className = "fb";
   fb.innerHTML = `<div class="verdict ${ok?"ok":"no"}">${ok ? "Richtig!" : "Leider falsch."}</div>
-    <div class="full">${colored(it)} <span class="hint">· ${esc(it.e)}</span></div>
+    <div class="full">${sayBtn(sayText(it))}<span>${colored(it)}</span><span class="hint">· ${esc(it.e)}</span></div>
     <p class="why">${reason(it)}</p>
     <div class="row"><span class="kbd">${esc(it.cat)}</span><button type="button" class="btn" id="next">${S.idx + 1 >= S.queue.length ? "See results" : "Next word"}</button></div>`;
   fb.hidden = false;
+  if (S.auto) speak(sayText(it), fb.querySelector(".say"));
   document.getElementById("card").classList.add(ok ? "pop" : "shake");
   document.getElementById("stats").innerHTML = statsHTML();
   const nb = document.getElementById("next");
@@ -821,7 +884,7 @@ function answer(v){
 function renderSummary(){
   const n = S.queue.length, pct = n ? Math.round(S.score / n * 100) : 0;
   const msg = pct === 100 ? "Perfekt. Every article right." : pct >= 70 ? "Sehr gut. A few to tidy up." : pct >= 40 ? "Gut gemacht. Repeat the mistakes below." : "Weiter üben. The reasons below will help.";
-  const misses = S.misses.map(it => `<li><span class="w">${colored(it)} <span class="hint">· ${esc(it.e)}</span></span><span class="r">${reason(it)}</span></li>`).join("");
+  const misses = S.misses.map(it => `<li><span class="w">${sayBtn(sayText(it), true)}<span>${colored(it)}</span><span class="hint">· ${esc(it.e)}</span></span><span class="r">${reason(it)}</span></li>`).join("");
   game.innerHTML = `${statsHTML()}<div class="card summary">
     <div class="prompt"><span class="kicker">Round finished</span><div class="big-score">${S.score}/${n}</div><h2>${msg}</h2></div>
     ${S.misses.length ? `<div class="section"><span class="kicker" style="font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)">Your mistakes</span><ul class="misslist">${misses}</ul></div>` : ""}
@@ -841,7 +904,7 @@ function renderList(){
   game.innerHTML = `<label class="sel" for="search" style="width:100%">Search
       <input type="search" id="search" placeholder="German or English word" value="${esc(S.q)}" style="flex:1">
     </label>
-    <div class="list">${items.length ? items.map(it => `<details><summary><span class="a t-${it.a}">${ART[it.a]}</span><span class="g t-${it.a}">${esc(it.w)}${it.a==="p"?' <small style="font-weight:400">(Pl.)</small>':""}</span><span class="e">${esc(it.e)}</span></summary><p>${reason(it)}</p></details>`).join("") : `<div class="empty">No words match “${esc(S.q)}”. Try fewer letters or switch the topic to All.</div>`}</div>`;
+    <div class="list">${items.length ? items.map(it => `<details><summary><span class="a t-${it.a}">${ART[it.a]}</span><span class="g t-${it.a}">${esc(it.w)}${it.a==="p"?' <small style="font-weight:400">(Pl.)</small>':""}</span><span class="e">${esc(it.e)}</span>${sayBtn(sayText(it), true)}</summary><p>${reason(it)}</p></details>`).join("") : `<div class="empty">No words match “${esc(S.q)}”. Try fewer letters or switch the topic to All.</div>`}</div>`;
   const s = document.getElementById("search");
   s.addEventListener("input", () => { S.q = s.value; const pos = s.selectionStart; renderList(); const n = document.getElementById("search"); n.focus(); n.setSelectionRange(pos,pos); });
 }
@@ -857,6 +920,11 @@ catSel.addEventListener("change", () => { S.cat = catSel.value; try{localStorage
 
 document.addEventListener("keydown", e => {
   if (S.mode === "list" || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const b = (S.answered ? document.querySelector("#fb .say") : document.querySelector(".prompt .say"));
+    if (b) { e.preventDefault(); speak(b.dataset.say, b); }
+    return;
+  }
   if (!S.answered && /^[1-4]$/.test(e.key)) {
     const b = game.querySelectorAll(".opt")[Number(e.key) - 1];
     if (b) { e.preventDefault(); answer(b.dataset.v); }
